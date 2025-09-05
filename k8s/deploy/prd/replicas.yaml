@@ -1,0 +1,6 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prd-reviewfilmes   # idem para PRD
+spec:
+  replicas: 8
