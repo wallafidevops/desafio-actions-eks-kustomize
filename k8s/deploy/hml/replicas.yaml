@@ -1,6 +1,13 @@
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: reviewfilmes   # precisa bater com o metadata.name do base
+# spec:
+#   replicas: 2
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: reviewfilmes   # precisa bater com o metadata.name do base
+  name: reviewfilmes
 spec:
   replicas: 2
