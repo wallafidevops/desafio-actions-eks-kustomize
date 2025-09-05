@@ -16,7 +16,7 @@ metadata:
 spec:
   ingressClassName: alb  
   rules:
-  - host: producao.wsnobrega.life
+  - host: homolog.app.wsnobrega.life
     http:
       paths:
       - path: /

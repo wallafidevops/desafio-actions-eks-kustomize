@@ -55,7 +55,8 @@ jobs:
 
           cd "$OVERLAY_DIR"
           kustomize edit set image \
-            $AWS_ECR_URI/${{ vars.STAGE }}-$IMAGE_NAME=$AWS_ECR_URI/${{ vars.STAGE }}-$IMAGE_NAME:$COMMIT_SHA
+            $AWS_ECR_URI/placeholder=$AWS_ECR_URI/${{ vars.STAGE }}-$IMAGE_NAME:$COMMIT_SHA
+
 
           echo "kustomization.yaml final:"
           cat kustomization.yaml
