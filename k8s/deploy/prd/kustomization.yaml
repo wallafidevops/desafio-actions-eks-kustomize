@@ -7,16 +7,16 @@ namePrefix: prd-
 namespace: prd-reviewfilmes
 
 resources:
-  - ../base
-  - ./ingress.yaml
-  - ./service.yaml
-  - ./postgre.yaml
+- ../base
+- ./ingress.yaml
+- ./service.yaml
+- ./postgre.yaml
 
 images:
-  - name: 216989136189.dkr.ecr.us-east-1.amazonaws.com/placeholder
-    newName: 216989136189.dkr.ecr.us-east-1.amazonaws.com/prd-review-filmes
-    newTag: latest
+- name: 216989136189.dkr.ecr.us-east-1.amazonaws.com/placeholder
+  newName: 216989136189.dkr.ecr.us-east-1.amazonaws.com/prd-review-filmes
+  newTag: 5ec1663
 
 patches:
-  - path: replicas.yaml
-  - path: patch-db.yaml
+- path: replicas.yaml
+- path: patch-db.yaml
