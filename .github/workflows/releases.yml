@@ -34,6 +34,9 @@ jobs:
           id: login-ecr
           uses: aws-actions/amazon-ecr-login@v2
 
+        - name: Definir tag SHA curta
+          run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV          
+
         - name: Build e Push 
           uses: docker/build-push-action@v6
           with:
@@ -41,8 +44,9 @@ jobs:
               file: ./src/Review-Filmes.Web/Dockerfile
               push: true
               tags: |
-                ${{ vars.ID_ACCOUNT }}.dkr.ecr.${{ vars.AWS_REGION}}.amazonaws.com/${{ vars.STAGE }}-review-filmes:latest
-                ${{ vars.ID_ACCOUNT }}.dkr.ecr.${{ vars.AWS_REGION}}.amazonaws.com/${{ vars.STAGE }}-review-filmes:${{ github.run_number }}
+                ${{ vars.ID_ACCOUNT }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.STAGE }}-review-filmes:latest
+                ${{ vars.ID_ACCOUNT }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.STAGE }}-review-filmes:${{ github.run_number }}
+                ${{ vars.ID_ACCOUNT }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.STAGE }}-review-filmes:${{ env.SHORT_SHA }}
         - name: Executar Trivy
           uses: aquasecurity/trivy-action@0.23.0
           with:
