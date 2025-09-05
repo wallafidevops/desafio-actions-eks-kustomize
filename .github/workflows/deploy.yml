@@ -5,7 +5,7 @@ on:
       environment:
         type: string
         required: true
-        description: 'Nome ambiente'
+        description: 'Nome ambiente (ex.: hml ou prd)'
 
 jobs:
   deploy:
@@ -15,31 +15,40 @@ jobs:
     env:
       AWS_ECR_URI: 216989136189.dkr.ecr.us-east-1.amazonaws.com
       IMAGE_NAME: review-filmes
-      BUILD_ID: ${{ github.run_number }}
       GIT_USER_NAME: wallafidevops
       GIT_USER_EMAIL: wallafisantos55@gmail.com
       ARGOCD_SERVER: argocd.app.wsnobrega.life
       ARGOCD_APP_NAME: review-filmes
       BRANCH_NAME: ${{ github.ref_name }}
+      STAGE: ${{ inputs.environment }}   # << usar SEMPRE esta var no job
     steps:
       - name: Checkout repositório atual
         uses: actions/checkout@v4
 
-      - name: Instalar dependências (yq, argocd, kustomize, ssh)
+      - name: Instalar dependências (yq, argocd, kustomize)
         run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y openssh-client curl git yq
-          curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+
+          # ArgoCD CLI
+          curl -fsSL -o /usr/local/bin/argocd \
+            https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
           chmod +x /usr/local/bin/argocd
-          curl -sSL "https://github.com/kubernetes-sigs/kustomize/releases/latest/download/kustomize_v5.4.3_linux_amd64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin kustomize
+
+          # Kustomize (pinado)
+          KUSTOMIZE_VERSION=5.4.3
+          curl -fsSL -o /tmp/kustomize.tar.gz \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          sudo tar -xzf /tmp/kustomize.tar.gz -C /usr/local/bin kustomize
+          kustomize version
 
       - name: Configurar Git
         run: |
           git config --global user.name "$GIT_USER_NAME"
           git config --global user.email "$GIT_USER_EMAIL"
 
-      - name: Clonar repositório GitOps
+      - name: Clonar repositório GitOps (kustomize)
         run: |
           set -euo pipefail
 
@@ -50,21 +59,32 @@ jobs:
           git checkout "$BRANCH_NAME" || git checkout -b "$BRANCH_NAME"
           git pull origin "$BRANCH_NAME" || true
 
-          OVERLAY_DIR="k8s/deploy/${{ vars.STAGE }}"
+          OVERLAY_DIR="k8s/deploy/$STAGE"
           COMMIT_SHA="${GITHUB_SHA::7}"
 
+          # Atualiza a imagem do overlay:
+          # ESQUERDA = imagem que existe no base (placeholder)
+          # DIREITA  = repo do ambiente + tag = SHA
           cd "$OVERLAY_DIR"
           kustomize edit set image \
-            $AWS_ECR_URI/placeholder=$AWS_ECR_URI/${{ vars.STAGE }}-$IMAGE_NAME:$COMMIT_SHA
-
+            $AWS_ECR_URI/placeholder=$AWS_ECR_URI/$STAGE-$IMAGE_NAME:$COMMIT_SHA
 
           echo "kustomization.yaml final:"
           cat kustomization.yaml
 
+          # Verificação anti-':latest'
+          echo "Renderização pós-set image:"
+          kustomize build . | grep -A1 "image:" || true
+          if kustomize build . | grep -q ":latest"; then
+            echo "ERRO: imagem ainda está com ':latest'."
+            exit 1
+          fi
+
+          # Commit apenas se houve mudança real
           cd -  # volta para raiz do repo GitOps
           if ! git diff --quiet -- "$OVERLAY_DIR/kustomization.yaml"; then
             git add "$OVERLAY_DIR/kustomization.yaml"
-            git commit -m "Atualiza imagem para $AWS_ECR_URI/${{ vars.STAGE }}-$IMAGE_NAME:$COMMIT_SHA"
+            git commit -m "Atualiza imagem para $AWS_ECR_URI/$STAGE-$IMAGE_NAME:$COMMIT_SHA"
             git push origin HEAD:"$BRANCH_NAME"
           else
             echo "Nenhuma mudança detectada em $OVERLAY_DIR/kustomization.yaml"
@@ -72,5 +92,6 @@ jobs:
 
       - name: Fazer login e sincronizar com ArgoCD
         run: |
+          set -euo pipefail
           argocd login "$ARGOCD_SERVER" --insecure --username admin --password "${{ secrets.ARGOCD_TOKEN }}" --grpc-web
-          argocd app sync "${{ vars.STAGE }}-${ARGOCD_APP_NAME}" --force --prune --grpc-web
+          argocd app sync "$STAGE-$ARGOCD_APP_NAME" --force --prune --grpc-web
