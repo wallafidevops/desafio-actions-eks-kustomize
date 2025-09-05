@@ -19,3 +19,4 @@ images:
 
 patches:
   - path: replicas.yaml
+  - path: patch-db.yaml
