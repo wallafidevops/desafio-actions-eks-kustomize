@@ -1,0 +1,100 @@
+name: Pipeline CI/CD
+run-name: Pipeline CI/CD executada no ambiente de ${{ vars.STAGE }}
+
+permissions:
+  id-token: write
+  contents: read
+  security-events: write
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    types:
+      - closed
+    paths-ignore:
+      - k8s/deploy/hml/*
+      - k8s/deploy/prd/*
+      
+  workflow_dispatch:
+
+jobs:
+  CI:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4.1.5
+
+  build-dev:
+    name: build-dev
+    if: github.event.pull_request.merged == true && github.base_ref == 'develop'
+    needs: [CI]
+    uses: wallafidevops/desafio-actions-eks/.github/workflows/build.yml@develop
+    with:
+      environment: dev
+    secrets: inherit
+
+  build-prod:
+    name: build-prod
+    if: github.event.pull_request.merged == true && github.base_ref == 'main'
+    needs: [CI]
+    uses: wallafidevops/desafio-actions-eks/.github/workflows/build.yml@main
+    with:
+      environment: prod
+    secrets: inherit
+
+  testes-dev:
+    name: testes-dev
+    if: github.event.pull_request.merged == true && github.base_ref == 'develop'
+    needs: [build-dev]
+    uses: wallafidevops/desafio-actions-eks/.github/workflows/testes.yml@develop
+    with:
+      environment: dev
+    secrets: inherit
+
+  testes-prod:
+    name: testes-prod
+    if: github.event.pull_request.merged == true && github.base_ref == 'main'
+    needs: [build-prod]
+    uses: wallafidevops/desafio-actions-eks/.github/workflows/testes.yml@main
+    with:
+      environment: prod
+    secrets: inherit
+
+  release-dev:
+    name: release-dev
+    if: github.event.pull_request.merged == true && github.base_ref == 'develop'
+    needs: [testes-dev]
+    uses: wallafidevops/desafio-actions-eks/.github/workflows/releases.yml@develop
+    with:
+      environment: dev
+    secrets: inherit
+
+  release-prod:
+    name: release-prod
+    if: github.event.pull_request.merged == true && github.base_ref == 'main'
+    needs: [testes-prod]
+    uses: wallafidevops/desafio-actions-eks/.github/workflows/releases.yml@main
+    with:
+      environment: prod
+    secrets: inherit
+
+  deploy-dev:
+    name: deploy-dev
+    if: github.event.pull_request.merged == true && github.base_ref == 'develop'
+    needs: [release-dev]
+    uses: wallafidevops/desafio-actions-eks/.github/workflows/deploy.yml@develop
+    with:
+      environment: dev
+    secrets: inherit
+
+  deploy-producao:
+    name: deploy-producao
+    if: github.event.pull_request.merged == true && github.base_ref == 'main'
+    needs: [release-prod]
+    uses: wallafidevops/desafio-actions-eks/.github/workflows/deploy.yml@main
+    with:
+      environment: prod
+    secrets: inherit

@@ -1,0 +1,65 @@
+name: Execução de release
+on:
+  workflow_call:
+    inputs:
+        environment:
+            type: string
+            required: true
+            description: 'Nome ambiente'
+
+permissions:
+  contents: read
+  security-events: write            
+
+jobs:
+    release:
+        name: Criação de release
+        environment: ${{ inputs.environment }}
+        runs-on: ubuntu-latest
+
+        steps: 
+        - name: Obyendo código fonte
+          uses: actions/checkout@v4
+        - name: Analise Dockerfile
+          uses: hadolint/hadolint-action@v3.1.0
+          with:
+            dockerfile: ./src/Review-Filmes.Web/Dockerfile
+        - name: Configure AWS Credentials
+          uses: aws-actions/configure-aws-credentials@v4
+          with:
+            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+            aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            aws-region: us-east-1          
+        - name: Login to ECR
+          id: login-ecr
+          uses: aws-actions/amazon-ecr-login@v2
+
+        - name: Build e Push 
+          uses: docker/build-push-action@v6
+          with:
+              context: ./src
+              file: ./src/Review-Filmes.Web/Dockerfile
+              push: true
+              tags: |
+                ${{ vars.ID_ACCOUNT }}.dkr.ecr.${{ vars.AWS_REGION}}.amazonaws.com/${{ vars.STAGE }}-review-filmes:latest
+                ${{ vars.ID_ACCOUNT }}.dkr.ecr.${{ vars.AWS_REGION}}.amazonaws.com/${{ vars.STAGE }}-review-filmes:${{ github.run_number }}
+        - name: Executar Trivy
+          uses: aquasecurity/trivy-action@0.23.0
+          with:
+            scan-type: image
+            image-ref: ${{ vars.ID_ACCOUNT }}.dkr.ecr.${{ vars.AWS_REGION}}.amazonaws.com/${{ vars.STAGE }}-review-filmes:${{ github.run_number }} 
+            format: sarif
+            output: trivy-docker-result.sarif
+            severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+
+        - name: Enviar SARIF para S3
+          run: |
+            aws s3 cp trivy-docker-result.sarif s3://artefatos-pipeline-216989136189/${{ vars.STAGE }}-review-filmes/${{ vars.STAGE }}-review-filmes-${{ github.run_number }}.sarif            
+
+        # - name: upload do arquivo triy para github 
+        #   uses: github/codeql-action/upload-sarif@v3
+        #   with:
+        #       category: docker-result
+        #       sarif_file: trivy-docker-result.sarif            
+
+              

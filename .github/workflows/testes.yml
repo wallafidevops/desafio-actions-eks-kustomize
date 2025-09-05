@@ -1,0 +1,98 @@
+name: Execução de testes
+on:
+  workflow_call:
+    inputs:
+        environment:
+            type: string
+            required: true
+            description: 'Nome ambiente'
+            
+   
+jobs:
+    unit-testes:
+        name: Testes unitários
+        environment: ${{ inputs.environment }}
+        runs-on: ubuntu-latest
+        steps:           
+          - name: Checkout
+            uses: actions/checkout@v4 
+          - name: Setup dotnet
+            uses: actions/setup-dotnet@v4
+            with:
+              dotnet-version: 8.0.300 
+          - name: Executando testes unitários
+            working-directory: ./src
+            run: dotnet test ./Review-Filmes.Test.Unit/Review-Filmes.Test.Unit.csproj 
+
+
+    integration-testes:
+        name: Testes de integração
+        environment: ${{ inputs.environment }}
+        runs-on: ubuntu-latest
+        services:
+          postgres:
+            image: postgres:latest
+            env:
+              POSTGRES_USER: review
+              POSTGRES_PASSWORD: postgrespwd
+              POSTGRES_DB: review-filmes
+            ports:
+              - 5432:5432
+        steps:           
+          - name: Checkout
+            uses: actions/checkout@v4 
+          - name: Setup dotnet
+            uses: actions/setup-dotnet@v4
+            with:
+              dotnet-version: 8.0.300 
+
+          - name: Executando testes integracao
+            working-directory: ./src
+            run: dotnet test ./Review-Filmes.Test.Integration/Review-Filmes.Test.Integration.csproj                
+            env:
+              ConnectionStrings__DefaultConnection: "Host=localhost;Port=5432;Database=review-filmes;Username=review;Password=postgrespwd"
+
+    sonarqube:  
+        name: Análise de código
+        environment: ${{ inputs.environment }}
+        runs-on: ubuntu-latest
+        steps: 
+          - name: Checkout
+            uses: actions/checkout@v4                      
+          - name: Setup JDK
+            uses: actions/setup-java@v4
+            with:
+              distribution: 'adopt'               
+              java-version: '21'
+             
+
+          - name: Setup Jdotnet
+            uses: actions/setup-dotnet@v4
+            with:
+              dotnet-version: 8.0.300
+
+          - name: Instalcao sonarqube 
+            run: dotnet tool install --global dotnet-sonarscanner
+
+          - name: Build e analise
+            working-directory: ./src
+            run: |
+                dotnet sonarscanner begin /k:"${{ vars.STAGE }}-review-filmes" /d:sonar.host.url="${{ secrets.SONAR_HOST_URL }}" /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
+                dotnet build Review-Filmes.sln
+                dotnet sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}" 
+          - name: Verificação do quality gate 
+            uses: sonarsource/sonarqube-quality-gate-action@master
+            id: sonarqube-quality-gate-check
+            env:
+               SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+               SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+            with:
+               scanMetadataReportFile: ./src/.sonarqube/out/.sonar/report-task.txt
+          - name: Exibir status quality gate
+            if: ${{ always() }}
+            run: echo "Quality Gate falhou na etapa ${{ steps.sonarqube-quality-gate-check.outputs.status }}" 
+            
+
+
+            
+## https://plataforma.devopspro.com.br/courses/af00ffe1-1d2f-4dce-9a19-780e59273907/2/1/28/conteudos?capitulo=28&conteudo=978  minuto 30

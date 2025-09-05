@@ -1,0 +1,64 @@
+name: Deploy no kubernetes 
+on: 
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+        description: 'Nome ambiente'
+
+jobs:
+  deploy:
+    name: Deploy no kubernetes
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    env:
+      AWS_ECR_URI: 216989136189.dkr.ecr.us-east-1.amazonaws.com
+      IMAGE_NAME: review-filmes
+      BUILD_ID: ${{ github.run_number }}
+      ARGOCD_SERVER: argocd.app.wsnobrega.life
+      ARGOCD_APP_NAME: review-filmes
+      BRANCH_NAME: ${{ github.ref_name }}
+    steps:
+      - name: Checkout repositório atual
+        uses: actions/checkout@v4
+
+      - name: Instalar dependências (kustomize, argocd)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-client curl git
+          curl -s https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh | bash
+          sudo mv kustomize /usr/local/bin
+          curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x /usr/local/bin/argocd
+
+      - name: Configurar Git com github-actions[bot]
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Clonar repositório GitOps e atualizar imagem com Kustomize
+        run: |
+          rm -rf desafio-actions-eks
+          git clone https://${{ secrets.GIT_USERNAME }}:${{ secrets.GIT_PASSWORD }}@github.com/wallafidevops/desafio-actions-eks.git
+          cd desafio-actions-eks
+
+          git checkout $BRANCH_NAME
+          git pull origin $BRANCH_NAME
+
+          cd k8s/deploy/${{ vars.STAGE }}
+          kustomize edit set image $AWS_ECR_URI/${{ vars.STAGE }}-$IMAGE_NAME=$AWS_ECR_URI/${{ vars.STAGE }}-$IMAGE_NAME:v${{ github.run_number }}
+
+          echo "YAML final:"
+          kustomize build .
+
+          git add .
+          git commit -m "[BOT] Atualiza imagem para $AWS_ECR_URI/${{ vars.STAGE }}-$IMAGE_NAME:v${{ github.run_number }}"
+          git push origin $BRANCH_NAME
+
+      - name: Fazer login e sincronizar com ArgoCD
+        run: |
+          argocd login $ARGOCD_SERVER --insecure --username admin --password ${{ secrets.ARGOCD_TOKEN }} --grpc-web
+          argocd app sync ${{ vars.STAGE }}-$ARGOCD_APP_NAME --force --prune --grpc-web
+
+
