@@ -23,7 +23,7 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: reviewfilmes
+            name: hml-reviewfilmes
             port: 
               number: 80
  
