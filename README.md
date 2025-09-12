@@ -1,35 +1,44 @@
 # Review-Filmes — CI/CD com GitHub Actions, Kustomize e EKS
 
-> Aplicação .NET para reviews de filmes com PostgreSQL, testes (unit, integration e e2e) e pipeline completa de CI/CD para Kubernetes (EKS), organizada por **overlays** (`hml` e `prd`) via **Kustomize**.
+> Aplicação **.NET 8** com **PostgreSQL**, testes (unit, integration e e2e) e pipeline **CI/CD** completa para **Amazon EKS** usando **GitHub Actions** + **Kustomize** (overlays `hml` e `prd`).
 
 ![CI](https://github.com/wallafidevops/desafio-actions-eks-kustomize/actions/workflows/main.yml/badge.svg)
 ![Tests](https://github.com/wallafidevops/desafio-actions-eks-kustomize/actions/workflows/testes.yml/badge.svg)
 ![Release](https://github.com/wallafidevops/desafio-actions-eks-kustomize/actions/workflows/releases.yml/badge.svg)
 ![Deploy](https://github.com/wallafidevops/desafio-actions-eks-kustomize/actions/workflows/deploy.yml/badge.svg)
 
+---
+
+## 🚦 Fluxo CI/CD (imagem)
+
+![Fluxo CI/CD](fluxo_cicd.png)
+
+---
+
 ## 🌳 Estrutura do repositório
 
-```
+```text
 .github/workflows/
-├─ main.yml        # CI: build, testes, análise
-├─ testes.yml      # (opcional) job dedicado de testes
-├─ releases.yml    # Release/tag + build de imagem
-└─ deploy.yml      # CD: deploy no EKS por overlay
+├─ main.yml        # Orquestra CI/CD em PR mergeado (develop/main)
+├─ build.yml       # build dotnet
+├─ testes.yml      # unit + integration + SonarQube
+├─ releases.yml    # build/push da imagem no ECR + Trivy (SARIF)
+└─ deploy.yml      # update de imagem no overlay + sync ArgoCD
 
 k8s/deploy/
 ├─ base/
 │  ├─ deployment.yaml
 │  └─ kustomization.yaml
 ├─ hml/
-│  ├─ ingress.yaml
-│  ├─ kustomization.yaml
+│  ├─ ingress.yaml            # host: homolog.app.wsnobrega.life
+│  ├─ kustomization.yaml      # image: 216989136189.dkr.ecr.us-east-1.amazonaws.com/hml-review-filmes:<tag>
 │  ├─ patch-db.yaml
 │  ├─ postgre.yaml
 │  ├─ replicas.yaml
 │  └─ service.yaml
 └─ prd/
-   ├─ ingress.yaml
-   ├─ kustomization.yaml
+   ├─ ingress.yaml            # host: prod.app.wsnobrega.life
+   ├─ kustomization.yaml      # image: 216989136189.dkr.ecr.us-east-1.amazonaws.com/prd-review-filmes:<tag>
    ├─ patch-db.yaml
    ├─ postgre.yaml
    ├─ replicas.yaml
@@ -43,15 +52,43 @@ src/
 └─ Review-Filmes.Test.EndToEnd/
 ```
 
-## ⚙️ Requisitos
+---
+
+## 🔧 Pré‑requisitos
 
 - .NET SDK 8+
 - Docker & Docker Compose
-- Kubectl, Kustomize (ou `kubectl kustomize`)
-- (CD) Acesso a um cluster **Amazon EKS** configurado
-- (CD) **AWS CLI** autenticado com permissões para ECR/EKS/KMS/Secrets Manager
+- kubectl + kustomize (ou `kubectl kustomize`)
+- AWS CLI autenticado
+- Cluster **EKS** com **AWS Load Balancer Controller**
+- **ArgoCD** acessível em `argocd.app.wsnobrega.life`
 
-## 🧪 Como rodar testes localmente
+---
+
+## 🔐 Secrets & Vars necessários (GitHub)
+
+### Variables (vars)
+| Nome | Exemplo | Uso |
+|---|---|---|
+| `AWS_REGION` | `us-east-1` | Região AWS |
+| `ID_ACCOUNT` | `216989136189` | Conta AWS |
+| `STAGE` | `dev` ou `prod` | Usado no run-name/Sonar e naming das imagens |
+
+### Secrets
+| Nome | Uso |
+|---|---|
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | `releases.yml` (se não usar OIDC) |
+| `SONAR_HOST_URL`, `SONAR_TOKEN` | `testes.yml` |
+| `GIT_USERNAME`, `GIT_PASSWORD` | `deploy.yml` faz push no repo |
+| `ARGOCD_TOKEN` | `deploy.yml` (argocd login) |
+
+**ECR** por ambiente:
+- HML → `216989136189.dkr.ecr.us-east-1.amazonaws.com/hml-review-filmes`
+- PRD → `216989136189.dkr.ecr.us-east-1.amazonaws.com/prd-review-filmes`
+
+---
+
+## 🧪 Testes locais
 
 ```bash
 dotnet restore
@@ -59,9 +96,9 @@ dotnet build -c Release
 dotnet test -c Release --collect:"XPlat Code Coverage"
 ```
 
-## 🐳 Executar localmente com Docker Compose
+## 🐳 Subir local com Docker Compose
 
-Crie um `.env` com variáveis:
+Crie um `.env` (opcional):
 
 ```env
 POSTGRES_DB=review
@@ -71,91 +108,46 @@ ASPNETCORE_ENVIRONMENT=Development
 ConnectionStrings__Default=Host=postgres;Database=review;Username=review;Password=postgrespwd
 ```
 
-Suba os serviços:
-
 ```bash
 docker compose up -d --build
+# http://localhost:8080
 ```
 
-Acesse: `http://localhost:8080`
+---
 
-## 🛠️ Build da imagem Docker (manual)
-
-```bash
-docker build -t review-filmes:local -f src/Review-Filmes.Web/Dockerfile .
-docker run --rm -p 8080:8080 --env-file .env review-filmes:local
-```
-
-### Push para o ECR
-
-```bash
-aws ecr get-login-password --region us-east-1  | docker login --username AWS --password-stdin 216989136189.dkr.ecr.us-east-1.amazonaws.com
-
-docker tag review-filmes:local 216989136189.dkr.ecr.us-east-1.amazonaws.com/hml-review-filmes:<tag>
-docker push 216989136189.dkr.ecr.us-east-1.amazonaws.com/hml-review-filmes:<tag>
-```
-
-## ☸️ Kubernetes com Kustomize
+## ☸️ Namespaces e Ingress
 
 Namespaces:
 - `hml-reviewfilmes`
 - `prd-reviewfilmes`
 
-Ingress:
-- Homologação → `homolog.app.wsnobrega.life`
-- Produção → `prod.app.wsnobrega.life`
+Ingress hosts:
+- HML → `homolog.app.wsnobrega.life`
+- PRD → `prod.app.wsnobrega.life`
 
-### Aplicar HML
-
+Deploy manual (debug):
 ```bash
 kubectl apply -k k8s/deploy/hml -n hml-reviewfilmes
-```
-
-### Aplicar PRD
-
-```bash
 kubectl apply -k k8s/deploy/prd -n prd-reviewfilmes
+kubectl rollout status deploy/<nome-do-deployment> -n <ns>
 ```
 
-## 🔐 Segredos e variáveis
+---
 
-- GitHub Actions:  
-  `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `ECR_REPOSITORY`, `KUBE_CONFIG`
-- Kubernetes Secrets: credenciais do PostgreSQL, connection string etc.
+## 🚀 CI/CD (quando PR é mergeado)
 
-## 🚀 Pipelines (GitHub Actions)
+1. `build.yml` → build .NET
+2. `testes.yml` → unit + integration + SonarQube
+3. `releases.yml` → build/push de imagem no **ECR** + **Trivy** (SARIF para S3)
+4. `deploy.yml` → atualiza `kustomization.yaml` do overlay (`hml`/`prd`) e executa **ArgoCD sync**
 
-### `main.yml` — CI
-- Build, testes, análise
-
-### `testes.yml` — Testes dedicados
-- Unit, integration, e2e
-
-### `releases.yml` — Release & Imagem
-- Builda imagem Docker, publica no **ECR**
-
-### `deploy.yml` — CD para EKS
-- Autentica na AWS/EKS
-- Aplica overlay (`hml` ou `prd`)
-
-## ✅ Checklist
-
-1. Criar ECR (já configurado):
-   - `216989136189.dkr.ecr.us-east-1.amazonaws.com/hml-review-filmes`
-   - `216989136189.dkr.ecr.us-east-1.amazonaws.com/prd-review-filmes`
-2. Configurar Secrets no GitHub
-3. Criar Namespaces no EKS (`hml-reviewfilmes`, `prd-reviewfilmes`)
-4. Criar Secrets no K8s para DB
-5. Rodar pipelines `releases.yml` e `deploy.yml`
-6. Validar rollout no cluster
+---
 
 ## 👥 Contribuição
 
 1. `git checkout -b feature/minha-feature`
-2. Commits claros
-3. PR para `develop` (HML) ou `main` (PRD)
+2. Commits semânticos
+3. PR para `develop` (hml) ou `main` (prd)
 
-## 📄 Licença
 
-MIT (ou a de sua preferência).
 
