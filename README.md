@@ -149,6 +149,5 @@ kubectl rollout status deploy/<nome-do-deployment> -n <ns>
 2. Commits semânticos
 3. PR para `develop` (hml) ou `main` (prd)
 
-## 📄 Licença
 
-MIT (ou a de sua preferência).
+
