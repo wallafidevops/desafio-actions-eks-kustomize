@@ -13,19 +13,23 @@
 ## 🚦 Fluxo CI/CD (visão geral)
 
 ```mermaid
+%% Renderiza no GitHub se suportado; fallback PNG abaixo
+
 flowchart LR
-  A[PR → main/develop<br/>mergeado] --> B[main.yml]
+  A[PR mergeado para main/develop] --> B[main.yml]
   B --> C{base_ref}
-  C -- develop --> D[build.yml (dev)]
-  C -- main --> E[build.yml (prod)]
+  C --|develop| D[build.yml (dev)]
+  C --|main| E[build.yml (prod)]
   D --> F[testes.yml (dev)]
   E --> G[testes.yml (prod)]
-  F --> H[releases.yml (dev) -> ECR]
-  G --> I[releases.yml (prod) -> ECR]
-  H --> J[deploy.yml (dev→overlay hml)]
-  I --> K[deploy.yml (prod→overlay prd)]
+  F --> H[releases.yml (dev) → ECR]
+  G --> I[releases.yml (prod) → ECR]
+  H --> J[deploy.yml (hml overlay)]
+  I --> K[deploy.yml (prd overlay)]
   J --> L[ArgoCD sync app hml-review-filmes]
   K --> M[ArgoCD sync app prd-review-filmes]
+`````````
+![Fluxo CI/CD](fluxo_cicd.png)
 ```
 
 ---
