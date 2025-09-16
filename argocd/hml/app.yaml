@@ -18,3 +18,16 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - RespectIgnoreDifferences=true      
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: hml-reviewfilmes
+      jsonPointers:
+        - /spec/replicas
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      name: hml-reviewfilmes
+      jsonPointers:
+        - /status/currentReplicas
+        - /status/desiredReplicas
