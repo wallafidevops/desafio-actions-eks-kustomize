@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hml-review-filmes
+  namespace: argocd
+spec:
+  project: review-filmes-project
+  source:
+    repoURL: https://github.com/wallafidevops/desafio-actions-eks-kustomize
+    path: k8s/deploy/hml
+    targetRevision: develop
+  destination:
+    name: cluster-hml
+    namespace: hml-reviewfilmes
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
