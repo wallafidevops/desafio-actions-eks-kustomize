@@ -1,0 +1,19 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: review-filmes-project
+  namespace: argocd
+spec:
+  sourceRepos:
+    - https://github.com/wallafidevops/desafio-actions-eks-kustomize
+  destinations:
+    - name: cluster-hml
+      namespace: hml-reviewfilmes
+    - name: cluster-prd
+      namespace: prd-reviewfilmes   # confira se é "prd-" ou "prod-"
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
