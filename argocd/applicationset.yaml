@@ -1,0 +1,50 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: review-filmes-appset
+  namespace: argocd
+spec:
+  generators:
+    - list:
+        elements:
+          - name: hml
+            cluster: cluster-hml
+            namespace: hml-reviewfilmes
+            path: k8s/deploy/hml
+            revision: develop
+          - name: prd
+            cluster: cluster-prd
+            namespace: prd-reviewfilmes
+            path: k8s/deploy/prd
+            revision: main
+  template:
+    metadata:
+      name: '{{name}}-review-filmes'
+    spec:
+      project: review-filmes-project
+      source:
+        repoURL: https://github.com/wallafidevops/desafio-actions-eks-kustomize
+        targetRevision: '{{revision}}'
+        path: '{{path}}'
+      destination:
+        name: '{{cluster}}'
+        namespace: '{{namespace}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - RespectIgnoreDifferences=true
+      ignoreDifferences:
+        - group: apps
+          kind: Deployment
+          name: '{{namespace}}'
+          jsonPointers:
+            - /spec/replicas
+        - group: autoscaling
+          kind: HorizontalPodAutoscaler
+          name: '{{namespace}}'
+          jsonPointers:
+            - /status/currentReplicas
+            - /status/desiredReplicas

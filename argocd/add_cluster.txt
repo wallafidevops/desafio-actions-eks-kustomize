@@ -1,0 +1,16 @@
+EKS
+
+# HML
+aws eks update-kubeconfig --region us-east-1 --name cluster-hml --alias cluster-hml
+
+# PRD
+aws eks update-kubeconfig --region us-east-1 --name cluster-prd --alias cluster-prd
+
+
+kubectl config get-contexts
+kubectl --context cluster-hml get ns
+kubectl --context cluster-prd get ns
+
+
+argocd cluster add cluster-hml  --name cluster-hml  --yes
+argocd cluster add cluster-prd  --name cluster-prd  --yes
