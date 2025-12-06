@@ -1,0 +1,99 @@
+name: Deploy no kubernetes
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+        description: 'Ambiente: use dev (→ hml) ou prod (→ prd) – ou passe hml/prd diretamente'
+
+jobs:
+  deploy:
+    # GitHub Environment usado p/ secrets/vars:
+    # dev quando input=hml, prod quando input=prd, caso contrário usa o que vier
+    environment: ${{ inputs.environment == 'hml' && 'dev' || inputs.environment == 'prd' && 'prod' || inputs.environment }}
+    runs-on: ubuntu-latest
+    env:
+      AWS_ECR_URI: 216989136189.dkr.ecr.us-east-1.amazonaws.com
+      IMAGE_NAME: review-filmes
+      GIT_USER_NAME: wallafidevops
+      ARGOCD_SERVER: argocd.app.wsnobrega.life
+      ARGOCD_APP_NAME: review-filmes
+      BRANCH_NAME: ${{ github.ref_name }}
+      # STAGE = overlay do Kustomize:
+      # hml quando input=dev, prd quando input=prod, caso contrário usa o próprio input (hml/prd)
+      STAGE: ${{ inputs.environment == 'dev' && 'hml' || inputs.environment == 'prod' && 'prd' || inputs.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar dependências (argocd, kustomize, yq)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y openssh-client curl git yq
+
+          # ArgoCD CLI
+          curl -fsSL -o /usr/local/bin/argocd \
+            https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x /usr/local/bin/argocd
+
+          # Kustomize (versão fixa)
+          KUSTOMIZE_VERSION=5.4.3
+          curl -fsSL -o /tmp/kustomize.tar.gz \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          sudo tar -xzf /tmp/kustomize.tar.gz -C /usr/local/bin kustomize
+          kustomize version
+
+      - name: Configurar Git
+        run: |
+          git config --global user.name "$GIT_USER_NAME"
+          git config --global user.email "$GIT_USER_EMAIL"
+
+      - name: Atualizar imagem no overlay ($STAGE)
+        run: |
+          set -euo pipefail
+          echo "STAGE=$STAGE (overlay Kustomize) | GH_ENV=${{ job.environment.name || '' }}"
+
+          rm -rf desafio-actions-eks-kustomize
+          git clone https://${{ secrets.GIT_USERNAME }}:${{ secrets.GIT_PASSWORD }}@github.com/wallafidevops/desafio-actions-eks-kustomize.git
+          cd desafio-actions-eks-kustomize
+          git fetch origin "$BRANCH_NAME" || true
+          git checkout "$BRANCH_NAME" || git checkout -b "$BRANCH_NAME"
+          git pull origin "$BRANCH_NAME" || true
+
+          OVERLAY_DIR="k8s/deploy/$STAGE"
+          test -d "$OVERLAY_DIR" || { echo "Overlay não encontrado: $OVERLAY_DIR"; exit 1; }
+
+          COMMIT_SHA="${GITHUB_SHA::7}"
+
+          cd "$OVERLAY_DIR"
+          # Troca placeholder -> <repo do ambiente>:<sha>
+          kustomize edit set image \
+            $AWS_ECR_URI/placeholder=$AWS_ECR_URI/$STAGE-$IMAGE_NAME:$COMMIT_SHA
+
+          echo "kustomization.yaml final:"
+          cat kustomization.yaml
+
+          echo "Renderização pós-set image:"
+          kustomize build . | grep -A1 "image:" || true
+          if kustomize build . | grep -q ":latest"; then
+            echo "ERRO: imagem ainda está ':latest' após set image."
+            exit 1
+          fi
+
+          cd -  # raiz do repo
+          if ! git diff --quiet -- "$OVERLAY_DIR/kustomization.yaml"; then
+            git add "$OVERLAY_DIR/kustomization.yaml"
+            git commit -m "Atualiza imagem para $AWS_ECR_URI/$STAGE-$IMAGE_NAME:$COMMIT_SHA"
+            git push origin HEAD:"$BRANCH_NAME"
+          else
+            echo "Nenhuma mudança detectada em $OVERLAY_DIR/kustomization.yaml"
+          fi
+
+      - name: Sincronizar com ArgoCD
+        run: |
+          set -euo pipefail
+          argocd login "$ARGOCD_SERVER" --insecure --username admin --password "${{ secrets.ARGOCD_TOKEN }}" --grpc-web
+          argocd app sync "$STAGE-$ARGOCD_APP_NAME" --force --prune --grpc-web
