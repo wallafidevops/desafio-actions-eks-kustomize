@@ -8,8 +8,10 @@ on:
             description: 'Nome ambiente'
 
 permissions:
+  id-token: write
   contents: read
-  security-events: write            
+  security-events: write
+  packages: read      
 
 jobs:
     release:
