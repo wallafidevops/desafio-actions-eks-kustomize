@@ -7,91 +7,88 @@ on:
         required: true
         description: 'Ambiente: use dev (→ hml) ou prod (→ prd) – ou passe hml/prd diretamente'
 
+permissions:
+  id-token: write
+  contents: read
+  security-events: write
+  packages: read
+
 jobs:
   deploy:
-    # GitHub Environment usado p/ secrets/vars:
-    # dev quando input=hml, prod quando input=prd, caso contrário usa o que vier
-    environment: ${{ inputs.environment == 'hml' && 'dev' || inputs.environment == 'prd' && 'prod' || inputs.environment }}
     runs-on: ubuntu-latest
+
+    container:
+      image: ghcr.io/wallafidevops/template-argocd-kustomize:0.1.0
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    defaults:
+      run:
+        shell: '/bin/bash -eo pipefail {0}'
+
+    environment: ${{ inputs.environment == 'hml' && 'dev' || inputs.environment == 'prd' && 'prod' || inputs.environment }}
+
     env:
       AWS_ECR_URI: 216989136189.dkr.ecr.us-east-1.amazonaws.com
       IMAGE_NAME: review-filmes
-      GIT_USER_NAME: wallafidevops
       ARGOCD_SERVER: argocd.app.wsnobrega.life
       ARGOCD_APP_NAME: review-filmes
       BRANCH_NAME: ${{ github.ref_name }}
-      # STAGE = overlay do Kustomize:
-      # hml quando input=dev, prd quando input=prod, caso contrário usa o próprio input (hml/prd)
+      GIT_BOT_USER: github-actions[bot]
+      GIT_BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+
       STAGE: ${{ inputs.environment == 'dev' && 'hml' || inputs.environment == 'prod' && 'prd' || inputs.environment }}
 
     steps:
-      - name: Checkout
+      - name: Checkout pipeline repo (source)
         uses: actions/checkout@v4
 
-      - name: Instalar dependências (argocd, kustomize, yq)
+      - name: Configurar Git para BOT
+        run: |
+          git config --global user.name  "$GIT_BOT_USER"
+          git config --global user.email "$GIT_BOT_EMAIL"
+
+      - name: Atualizar imagem no overlay (${{ env.STAGE }})
+        env:
+          GIT_USERNAME: ${{ secrets.GIT_USERNAME }}
+          GIT_PASSWORD: ${{ secrets.GIT_PASSWORD }}
+          STAGE: ${{ env.STAGE }}
+          AWS_ECR_URI: ${{ env.AWS_ECR_URI }}
+          IMAGE_NAME:  ${{ env.IMAGE_NAME }}
+          BRANCH_NAME: ${{ env.BRANCH_NAME }}
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y openssh-client curl git yq
-
-          # ArgoCD CLI
-          curl -fsSL -o /usr/local/bin/argocd \
-            https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-          chmod +x /usr/local/bin/argocd
-
-          # Kustomize (versão fixa)
-          KUSTOMIZE_VERSION=5.4.3
-          curl -fsSL -o /tmp/kustomize.tar.gz \
-            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
-          sudo tar -xzf /tmp/kustomize.tar.gz -C /usr/local/bin kustomize
-          kustomize version
-
-      - name: Configurar Git
-        run: |
-          git config --global user.name "$GIT_USER_NAME"
-          git config --global user.email "$GIT_USER_EMAIL"
-
-      - name: Atualizar imagem no overlay ($STAGE)
-        run: |
-          set -euo pipefail
-          echo "STAGE=$STAGE (overlay Kustomize) | GH_ENV=${{ job.environment.name || '' }}"
 
           rm -rf desafio-actions-eks-kustomize
-          git clone https://${{ secrets.GIT_USERNAME }}:${{ secrets.GIT_PASSWORD }}@github.com/wallafidevops/desafio-actions-eks-kustomize.git
+          git clone "https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/wallafidevops/desafio-actions-eks-kustomize.git"
+
           cd desafio-actions-eks-kustomize
+
           git fetch origin "$BRANCH_NAME" || true
           git checkout "$BRANCH_NAME" || git checkout -b "$BRANCH_NAME"
           git pull origin "$BRANCH_NAME" || true
 
-          OVERLAY_DIR="k8s/deploy/$STAGE"
+          OVERLAY_DIR="k8s/deploy/${STAGE}"
           test -d "$OVERLAY_DIR" || { echo "Overlay não encontrado: $OVERLAY_DIR"; exit 1; }
 
-          COMMIT_SHA="${GITHUB_SHA::7}"
+          SHORT_SHA="${GITHUB_SHA::7}"
 
           cd "$OVERLAY_DIR"
-          # Troca placeholder -> <repo do ambiente>:<sha>
+
           kustomize edit set image \
-            $AWS_ECR_URI/placeholder=$AWS_ECR_URI/$STAGE-$IMAGE_NAME:$COMMIT_SHA
+            "$AWS_ECR_URI/placeholder=$AWS_ECR_URI/${STAGE}-${IMAGE_NAME}:${SHORT_SHA}"
 
-          echo "kustomization.yaml final:"
-          cat kustomization.yaml
+          cd - >/dev/null
 
-          echo "Renderização pós-set image:"
-          kustomize build . | grep -A1 "image:" || true
-          if kustomize build . | grep -q ":latest"; then
-            echo "ERRO: imagem ainda está ':latest' após set image."
-            exit 1
-          fi
-
-          cd -  # raiz do repo
           if ! git diff --quiet -- "$OVERLAY_DIR/kustomization.yaml"; then
             git add "$OVERLAY_DIR/kustomization.yaml"
-            git commit -m "Atualiza imagem para $AWS_ECR_URI/$STAGE-$IMAGE_NAME:$COMMIT_SHA"
-            git push origin HEAD:"$BRANCH_NAME"
+            git commit -m "[BOT] Atualiza imagem para ${AWS_ECR_URI}/${STAGE}-${IMAGE_NAME}:${SHORT_SHA}"
+            git push origin "HEAD:${BRANCH_NAME}"
           else
-            echo "Nenhuma mudança detectada em $OVERLAY_DIR/kustomization.yaml"
+            echo "Nenhuma mudança detectada."
           fi
-
+          
       - name: Sincronizar com ArgoCD
         run: |
           set -euo pipefail
