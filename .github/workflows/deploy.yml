@@ -19,9 +19,9 @@ jobs:
 
     container:
       image: ghcr.io/wallafidevops/template-argocd-kustomize:0.1.0
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+      # credentials:
+      #   username: ${{ github.actor }}
+      #   password: ${{ secrets.GITHUB_TOKEN }}
 
     defaults:
       run:
@@ -88,7 +88,7 @@ jobs:
           else
             echo "Nenhuma mudança detectada."
           fi
-          
+
       - name: Sincronizar com ArgoCD
         run: |
           set -euo pipefail
